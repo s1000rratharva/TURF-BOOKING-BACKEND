@@ -3,39 +3,56 @@ import Razorpay from "razorpay";
 import cors from "cors";
 import dotenv from "dotenv";
 
-dotenv.config(); // Load environment variables from .env
+dotenv.config(); // Load environment variables
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// ✅ Middleware
-app.use(cors({ origin: "*" })); // Allow requests from any origin
-app.use(express.json()); // Parse JSON request bodies
+// ---- Middleware ----
+const allowedOrigin = process.env.FRONTEND_ORIGIN || "*";
+app.use(cors({ origin: allowedOrigin }));
+app.use(express.json());
 
-// ✅ Check environment variables
-if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+// ---- Env validation ----
+const { RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, NODE_ENV } = process.env;
+if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
   console.warn("⚠️ Razorpay credentials are missing in .env file!");
+  if (NODE_ENV === "production") {
+    console.error("❌ Cannot start server without Razorpay credentials in production.");
+    process.exit(1);
+  }
 }
 
-// ✅ Initialize Razorpay instance
+// ---- Razorpay instance ----
 const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
+  key_id: RAZORPAY_KEY_ID,
+  key_secret: RAZORPAY_KEY_SECRET,
 });
 
-// ✅ Razorpay Order API
+// ---- Health check ----
+app.get("/", (_req, res) => {
+  res.send("Turf Booking API is running ✅");
+});
+
+// ---- Create Order ----
 app.post("/create-order", async (req, res) => {
   try {
-    const { amount } = req.body;
+    const { amount, activity, date, slots } = req.body;
 
-    if (!amount) {
-      return res.status(400).json({ error: "Amount is required" });
+    const amountNum = Number(amount);
+    if (!amountNum || isNaN(amountNum) || amountNum <= 0) {
+      return res.status(400).json({ error: "Valid amount (₹) is required" });
     }
 
     const options = {
-      amount: amount * 100, // Convert to paise
+      amount: Math.round(amountNum * 100), // paise
       currency: "INR",
       receipt: `receipt_order_${Date.now()}`,
+      notes: {
+        activity: activity || "",
+        date: date || "",
+        slots: Array.isArray(slots) ? slots.join(",") : slots || "",
+      },
     };
 
     const order = await razorpay.orders.create(options);
@@ -48,7 +65,7 @@ app.post("/create-order", async (req, res) => {
   }
 });
 
-// ✅ Start the server
+// ---- Start server ----
 app.listen(PORT, () => {
   console.log(`🚀 Backend running on http://localhost:${PORT}`);
 });
